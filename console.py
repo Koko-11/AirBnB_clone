@@ -1,269 +1,351 @@
 #!/usr/bin/python3
-"""It defines the HBNB console."""
+"""
+console module
+"""
 import cmd
+import re
+import sys
+import json
 from shlex import split
+# from models import base_model
+# from models import user
 from models import storage
-from datetime import datetime
 from models.base_model import BaseModel
 from models.user import User
+from models.place import Place
+from models.amenity import Amenity
+from models.review import Review
 from models.state import State
 from models.city import City
-from models.amenity import Amenity
-from models.place import Place
-from models.review import Review
 
 
 class HBNBCommand(cmd.Cmd):
-    """It defines the ALX-HolbertonBnB command interpreter."""
+    """
+    Creates the console interpreter for AirBnB project
+    """
+    prompt = '(hbnb) '
 
-    prompt = "(hbnb) "
-    __classes = {
-        "BaseModel",
-        "User",
-        "State",
-        "City",
-        "Amenity",
-        "Place",
-        "Review"
-    }
+    def type_parser(self, token):
+        """
+        Returns the attribute value according to the given type
+        """
+        if token.isalpha():
+            return str(token)
+        if token.isdigit():
+            return int(token)
+        if re.search('[a-zA-Z]', token) and re.search('[0-9]', token):
+            return str(token)
+        if (token.startswith("'") and token.endswith("'")):
+            word = token.strip("'")
+            return str(word)
+        if (token.startswith('"') and token.endswith('"')):
+            word = token.strip('"')
+            return str(word)
+        if '.' in token:
+            return float(token)
+        return token
+
+    def update_dictionary_loader(self, token):
+        """
+        Checks if a dictionary has been passed as an
+        argument to the update method.
+        If true adds the data to the object.
+        Else the update method continues with the operation
+        """
+        if '{' in token and '}' in token:
+            args = token.split(' ', maxsplit=2)
+            dict_str = args[2].replace("'", '"')
+            tmp_dict = json.loads(dict_str)
+
+            try:
+                my_class = globals()[args[0]]
+            except Exception:
+                print("** class name missing **")
+            try:
+                classname = getattr(my_class, '__name__')
+            except Exception:
+                print("** class doesn't exist **")
+                return
+
+            key1 = classname + '.' + args[1]
+            for key, obj in storage.all().items():
+                if key == key1:
+                    for key, value in tmp_dict.items():
+                        key_str = str(key)
+                        attr_val = value
+                        setattr(obj, key_str, attr_val)
+                    storage.save()
+                    storage.reload()
+                    break
+            return True
+        return False
+
+    def add_quotes(self, token):
+        """
+        Protects the token's type from being altered
+        (by the type_parser class method) if called from
+        the Default class method
+        """
+        if type(token) == str:
+            if token.isdigit():
+                word = '"' + token + '"'
+                return word
+            if re.match(r'^\d+\.\d+$', token):
+                word = '"' + token + '"'
+                return word
+        return token
+
+    def do_quit(self, arg):
+        """
+        Quit command to exit the program
+        """
+        return True
+
+    def do_EOF(self, arg):
+        """
+        EOF signal to exit the program
+        """
+        return True
 
     def emptyline(self):
-        """Ignores empty spaces."""
+        """
+        An empty line + ENTER shouldn’t execute anything
+        """
         pass
 
-    def do_quit(self, line):
-        """Quits the program."""
-        return True
-
-    def do_EOF(self, line):
-        """Exits the program when receiving EOF signal."""
-        print("")
-        return True
-
-    def do_create(self, line):
-        """Creates a new class instance with given keys/values and prints its id."""
-        try:
-            if not line:
-                raise SyntaxError()
-            my_list = line.split(" ")
-
-            kwargs = {}
-            for i in range(1, len(my_list)):
-                key, value = tuple(my_list[i].split("="))
-                if value[0] == '"':
-                    value = value.strip('"').replace("_", " ")
-                else:
-                    try:
-                        value = eval(value)
-                    except (SyntaxError, NameError):
-                        continue
-                kwargs[key] = value
-
-            if kwargs == {}:
-                obj = eval(my_list[0])()
-            else:
-                obj = eval(my_list[0])(**kwargs)
-                storage.new(obj)
-            print(obj.id)
-            obj.save()
-
-        except SyntaxError:
-            print("** class name missing **")
-        except NameError:
-            print("** class doesn't exist **")
-
-    def do_show(self, line):
-        """Prints the string representation of an instance
-        Exceptions:
-            SyntaxError: when there is no args given
-            NameError: when there is no object taht has the name
-            IndexError: when there is no id given
-            KeyError: when there is no valid id given
+    def do_create(self, arg):
         """
-        try:
-            if not line:
-                raise SyntaxError()
-            my_list = line.split(" ")
-            if my_list[0] not in self.__classes:
-                raise NameError()
-            if len(my_list) < 2:
-                raise IndexError()
-            objects = storage.all()
-            key = my_list[0] + '.' + my_list[1]
-            if key in objects:
-                print(objects[key])
-            else:
-                raise KeyError()
-        except SyntaxError:
+        Creates a new instance of BaseModel,
+        saves it (to the JSON file) and prints the id.
+        Usage: <class name>.create()
+               create <class name>
+        """
+        if not arg:
             print("** class name missing **")
-        except NameError:
+            return
+        args = arg.split()
+        if hasattr(sys.modules[__name__], args[0]):
+            cls = getattr(sys.modules[__name__], args[0])
+        else:
             print("** class doesn't exist **")
-        except IndexError:
+            return
+
+        obj = cls()
+        obj.save()
+        storage.reload()
+        print(obj.id)
+
+    def do_show(self, arg):
+        """
+        Prints the string representation of an
+        instance based on the class name and id.
+        Usage: <class name>.show(<id>)
+               show <class name> <id>
+        """
+        if not arg:
+            print("** class name missing **")
+            return
+
+        args = arg.split()
+        try:
+            my_class = globals()[args[0]]
+            classname = getattr(my_class, '__name__')
+        except Exception:
+            print("** class doesn't exist **")
+            return
+
+        if len(args) < 2:
             print("** instance id missing **")
-        except KeyError:
-            print("** no instance found **")
+            return
 
-    def do_destroy(self, line):
-        """Deletes an instance based on the class name and id
-        Exceptions:
-            SyntaxError: when there is no args given
-            NameError: when there is no object taht has the name
-            IndexError: when there is no id given
-            KeyError: when there is no valid id given
+        obj_id = args[1]
+        key1 = classname + '.' + obj_id
+        if key1 not in storage.all():
+            print("** no instance found **")
+            return
+        for key, value in storage.all().items():
+            if key == key1:
+                obj = value
+                print(obj)
+
+    def do_destroy(self, arg):
         """
+        Deletes an instance based on the class name
+        and id (save the change into the JSON file).
+        Usage: <class name>.destroy(<id>)
+               destroy <class name> <id>
+        """
+        if not arg:
+            print("** class name missing **")
+            return
+
+        args = arg.split()
         try:
-            if not line:
-                raise SyntaxError()
-            my_list = line.split(" ")
-            if my_list[0] not in self.__classes:
-                raise NameError()
-            if len(my_list) < 2:
-                raise IndexError()
-            objects = storage.all()
-            key = my_list[0] + '.' + my_list[1]
-            if key in objects:
-                del objects[key]
+            my_class = globals()[args[0]]
+            classname = getattr(my_class, '__name__')
+        except Exception:
+            print("** class doesn't exist **")
+            return
+
+        if len(args) < 2:
+            print("** instance id missing **")
+            return
+
+        obj_id = args[1]
+        key1 = classname + '.' + obj_id
+        if key1 not in storage.all():
+            print("** no instance found **")
+            return
+        for key, obj in storage.all().items():
+            if key == key1:
+                del storage.all()[key]
                 storage.save()
-            else:
-                raise KeyError()
-        except SyntaxError:
-            print("** class name missing **")
-        except NameError:
-            print("** class doesn't exist **")
-        except IndexError:
-            print("** instance id missing **")
-        except KeyError:
-            print("** no instance found **")
+                storage.reload()
+                break
 
     def do_all(self, line):
-        """Usage: all or all <class> or <class>.all()
-        Display string representations of all instances of a given class.
-        If no class is specified, displays all instantiated objects."""
-        if not line:
-            o = storage.all()
-            print([o[k].__str__() for k in o])
-            return
-        try:
-            args = line.split(" ")
-            if args[0] not in self.__classes:
-                raise NameError()
-
-            o = storage.all(eval(args[0]))
-            print([o[k].__str__() for k in o])
-
-        except NameError:
-            print("** class doesn't exist **")
-
-    def do_update(self, line):
-        """Updates an instanceby adding or updating attribute
-        Exceptions:
-            SyntaxError: when there is no args given
-            NameError: when there is no object taht has the name
-            IndexError: when there is no id given
-            KeyError: when there is no valid id given
-            AttributeError: when there is no attribute given
-            ValueError: when there is no value given
         """
-        try:
-            if not line:
-                raise SyntaxError()
-            my_list = split(line, " ")
-            if my_list[0] not in self.__classes:
-                raise NameError()
-            if len(my_list) < 2:
-                raise IndexError()
-            objects = storage.all()
-            key = my_list[0] + '.' + my_list[1]
-            if key not in objects:
-                raise KeyError()
-            if len(my_list) < 3:
-                raise AttributeError()
-            if len(my_list) < 4:
-                raise ValueError()
-            v = objects[key]
-            try:
-                v.__dict__[my_list[2]] = eval(my_list[3])
-            except Exception:
-                v.__dict__[my_list[2]] = my_list[3]
-                v.save()
-        except SyntaxError:
-            print("** class name missing **")
-        except NameError:
-            print("** class doesn't exist **")
-        except IndexError:
-            print("** instance id missing **")
-        except KeyError:
-            print("** no instance found **")
-        except AttributeError:
-            print("** attribute name missing **")
-        except ValueError:
-            print("** value missing **")
-
-    def count(self, line):
-        """count the number of instances of a class
+        Prints all string representations of
+        instances of a class if no argument is given
+        else prints string representation of instances
+        of the given class
+        Usage: <all>
+               <class name>.all()
         """
-        counter = 0
-        try:
-            my_list = split(line, " ")
-            if my_list[0] not in self.__classes:
-                raise NameError()
-            objects = storage.all()
-            for key in objects:
-                name = key.split('.')
-                if name[0] == my_list[0]:
-                    counter += 1
-            print(counter)
-        except NameError:
-            print("** class doesn't exist **")
-
-    def strip_clean(self, args):
-        """strips the argument and return a string of command
-        Args:
-            args: input list of args
-        Return:
-            returns string of argumetns
-        """
-        new_list = []
-        new_list.append(args[0])
-        try:
-            my_dict = eval(
-                args[1][args[1].find('{'):args[1].find('}')+1])
-        except Exception:
-            my_dict = None
-        if isinstance(my_dict, dict):
-            new_str = args[1][args[1].find('(')+1:args[1].find(')')]
-            new_list.append(((new_str.split(", "))[0]).strip('"'))
-            new_list.append(my_dict)
-            return new_list
-        new_str = args[1][args[1].find('(')+1:args[1].find(')')]
-        new_list.append(" ".join(new_str.split(", ")))
-        return " ".join(i for i in new_list)
-
-    def default(self, line):
-        """retrieve all instances of a class and
-        retrieve the number of instances
-        """
-        my_list = line.split('.')
-        if len(my_list) >= 2:
-            if my_list[1] == "all()":
-                self.do_all(my_list[0])
-            elif my_list[1] == "count()":
-                self.count(my_list[0])
-            elif my_list[1][:4] == "show":
-                self.do_show(self.strip_clean(my_list))
-            elif my_list[1][:7] == "destroy":
-                self.do_destroy(self.strip_clean(my_list))
-            elif my_list[1][:6] == "update":
-                args = self.strip_clean(my_list)
-                if isinstance(args, list):
-                    obj = storage.all()
-                    key = args[0] + ' ' + args[1]
-                    for k, v in args[2].items():
-                        self.do_update(key + ' "{}" "{}"'.format(k, v))
-                else:
-                    self.do_update(args)
+        class_name = line.strip()
+        objects = storage.all()
+        if not class_name:
+            obj_list = [str(obj) for obj in objects.values()]
+            print(obj_list)
         else:
-            cmd.Cmd.default(self, line)
+            try:
+                my_class = globals()[class_name]
+                classname = getattr(my_class, '__name__')
+            except Exception:
+                print("** class doesn't exist **")
+                return
+            print([
+                str(obj)
+                for obj in objects.values()
+                if obj.__class__.__name__ == class_name
+                ])
+
+    def do_update(self, arg):
+        """
+        Updates an instance based on the class name and
+        id by adding or updating attribute (save the
+        change into the JSON file)
+        Usage: update <class name> <id> <attribute name> <attribute value>
+               <class name>.update(<id>, <attribute name>, <attribute value>)
+               <class name> <id> <dictionary representation>
+               <class name>.update(<id>, <dictionary representation>
+        """
+        if not arg:
+            print("** class name missing **")
+            return
+        if self.update_dictionary_loader(arg):
+            return
+        args = arg.split()
+        try:
+            my_class = globals()[args[0]]
+            classname = getattr(my_class, '__name__')
+        except Exception:
+            print("** class doesn't exist **")
+            return
+        if len(args) < 2:
+            print("** instance id missing **")
+            return
+        obj_id = args[1]
+        key1 = classname + '.' + obj_id
+        if key1 not in storage.all():
+            print("** no instance found **")
+            return
+        if len(args) < 3:
+            print("** attribute name missing **")
+            return
+        if len(args) < 4:
+            print("** value missing **")
+            return
+        for key, obj in storage.all().items():
+            if key == key1:
+                new_value = self.type_parser(args[3])
+                setattr(obj, args[2], new_value)
+                storage.save()
+                storage.reload()
+                break
+
+    def do_count(self, arg):
+        """
+        Counts the number of instances of a class
+        Usage: count <class name>
+               <class name>.count()
+        """
+        storage.reload()
+        if not arg:
+            print("** class name missing **")
+            return
+
+        args = arg.split()
+        try:
+            my_class = globals()[args[0]]
+            classname = getattr(my_class, '__name__')
+        except Exception:
+            print("0")
+            return
+        objects = storage.all()
+        count = 0
+        for key in objects.keys():
+            if args[0] in key:
+                count += 1
+        print("{}".format(count))
+
+    def default(self, arg):
+        """
+        Default behavior for cmd module when input is invalid
+        """
+        argdict = {
+                "create": self.do_create,
+                "all": self.do_all,
+                "show": self.do_show,
+                "destroy": self.do_destroy,
+                "count": self.do_count,
+                "update": self.do_update
+                }
+        match = re.search(r"\.", arg)
+        if match is not None:
+            argl = [arg[:match.span()[0]], arg[match.span()[1]:]]
+            match = re.search(r"\((.*?)\)", argl[1])
+            if not argl[0] and argl[1] != "all()":
+                print("** class name missing **")
+                return
+            if match is not None:
+                command = [argl[1][:match.span()[0]], match.group()[1:-1]]
+                if command[0] == 'update' and \
+                        '{' in command[1] and \
+                        '}' in command[1]:
+                    cmd_str = command[1].split(', ', maxsplit=1)
+                    dict_str = cmd_str[1].replace("'", "\"")
+                    try:
+                        d_dict = json.loads(dict_str)
+                    except Exception:
+                        return
+                    for key, value in d_dict.items():
+                        k_str = str(key)
+                        v_str = self.add_quotes(value)
+                        call = "{} {} {} {}".format(
+                                argl[0], cmd_str[0],
+                                k_str, v_str
+                                )
+                        argdict[command[0]](call)
+                    return
+
+                elif command[0] in argdict.keys():
+                    call = "{} {}".format(argl[0], command[1])
+                    call = re.sub(r',', '', call)
+                    return argdict[command[0]](call)
+
+        print("*** Unknown syntax: {}".format(arg))
+        return False
 
 
 if __name__ == '__main__':
